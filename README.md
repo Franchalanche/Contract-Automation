@@ -2,7 +2,7 @@
 
 - Then I realized that our tables hadn't been updated in years and were missing a lot of contracts.
 
--  Switched focus to "Contract View Basis v4.sql" that tries to automatically categorize the bad data.
+-  Switched focus to "Contract View Basis v4.sql" that tries to automatically categorize the bad (new & old) data.
  
 -    Like a lot of processes, we will have to rely on continual QC & updates for new exceptions, given no client data management power
     
