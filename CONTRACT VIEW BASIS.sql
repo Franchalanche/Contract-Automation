@@ -1,3 +1,8 @@
+-
+select distinct ContractType
+from dldb.dbo.[dl_dw_luFaxContract]
+
+
 drop table if exists #Med_Rx_Benefits;
 --select 'DLDB.DBO.dl_dw_contractspecifications_sand' 'Contracts Most Recent Benefit Descriptions'
 select --top 200 
@@ -6,6 +11,7 @@ C.ContractDesc
 , CS.[Text]
 , C.Active
 , C.GoLive_Date
+, C.ContractType
 , case  when CS.[Text] like '%combined%' or CS.[Text] like '%including Rx%' then 'Combined' 
 		else '' end 
 		as Combined_or_Split_Benefit
@@ -105,7 +111,7 @@ C.ContractDesc
 	when CS.Title like '%medical%' 
 		and CS.[Text] IN ('Unlimited TI/IUI. No ART coverage.'
 						,'Unlimited IUI. No ART coverage'
-						,'4 retrieval benefit - plus 2 addl cycles if one cycle (of the 4 cycles) results in a live birth 6 IUI cycle LTM'
+						,'4 retrieval benefit - plus 2 add’l cycles if one cycle (of the 4 cycles) results in a live birth 6 IUI cycle LTM'
 						,'SIX TOTAL IUIs. No cycle count limitations on TI or IVF/ART services.')
 		then CS.[Text]
 	WHEN cs.TITLE like '%medical%' 
@@ -145,7 +151,13 @@ C.ContractDesc
 		--or (CS.[Text] like '%No%' and CS.[Text] like '%limit%')
 		or (CS.[Text] like '%No limitation%' and CS.[Text] like '%cycle%')
 		or (CS.[Text] like '%No%' and CS.[Text] like '%maximum%')
-		then 'Unlimited'	ELSE '' END as Nvarchar(max)) AS --Medical_
+		then 'Unlimited'	
+	when cs.[Text] like '%per occurrence for adoption/surrogacy%'
+		and cs.[Text] like '%20,000%'
+		then '$20k per S or A event'
+	when cs.[Text] like '%151,000 Rupee Combined%'
+		then '151,000 Rupees'
+		ELSE '' END as Nvarchar(max)) AS --Medical_
 			Limit
 into #Med_Rx_Benefits
 from [DLDB].[dbo].[dl_dw_luFaxContract] C
@@ -165,7 +177,7 @@ WHERE 1=1
 							and isnull(cs2.[Text],'')<>''
 							and cs2.[Text] <> 'N/A'
 						)
-group by C.ContractDesc, CS.Title, CS.[Text], C.Active, C.GoLive_Date --, C.Text 
+group by C.ContractDesc, C.ContractTYpe, CS.Title, CS.[Text], C.Active, C.GoLive_Date --, C.Text 
 ; 
 
 
@@ -196,7 +208,7 @@ where 1=1
 		or med_rx.[Text] like '%No specific fertility Rx limit%'
 		or med_rx.[Text] like '%match approved fertility%'
 		)
-;
+
 
 update med_rx 
 set med_rx.Combined_or_split_benefit  = 'Combined'
@@ -215,18 +227,6 @@ set Limit = 'NOT Managed by WIN', Benefit_Type = 'NOT Managed by WIN'
 where [Text] like '%warm transfer%'
 ;
 
---select '#Med_Rx_Benefits' 'Table'
---select ContractDesc
---	,Title
---	, Benefit_Type
---	, --Medical_
---		Limit
---	, Combined_or_split_benefit
---	, [TExt]
---from #Med_Rx_Benefits
-----where Medical_Limit = ''
-----where Benefit_Type = 'Cycle'
---order by ContractDesc, Title, [TExt];
 
 DELETE #Med_Rx_Benefits
 WHERE [Text] like 'n/a%';
@@ -234,15 +234,7 @@ WHERE [Text] like 'n/a%';
 DELETE #Med_Rx_Benefits
 WHERE ContractDesc like 'ZYX%' or ContractDesc like 'Womens Integrated Network-Premier';
 
---select * from #med_rx_benefits
---where [Text] like 'Details unknown%'
 
---SELECT 
---    COLUMN_NAME,
---    DATA_TYPE,
---    CHARACTER_MAXIMUM_LENGTH
---FROM tempdb.INFORMATION_SCHEMA.COLUMNS
---WHERE TABLE_NAME LIKE '#Med_Rx_Benefits%';
 
 UPDATE #Med_Rx_Benefits
 set bENEFIT_tYPE = 'Unknown'
@@ -250,25 +242,6 @@ set bENEFIT_tYPE = 'Unknown'
 where [Text] like 'Details unknown%'
 ;
 
-----select '#Med_Rx_Benefits' 'Table'
---select ContractDesc
---	,Title
---	, Benefit_Type
---	, --Medical_
---		Limit
---	, Combined_or_split_benefit
---	, [TExt]
---from #Med_Rx_Benefits
-----where Medical_Limit = ''
-----where Benefit_Type = 'Cycle'
---where --ContractDesc like 'AG1%' or ContractDesc like 'Allspring%' 
---ContractDesc like 'Baker%' or ContractDesc like 'Berdon%' or ContractDesc like 'BOA%' 
---order by ContractDesc, Title, [TExt];
-
---select distinct [Text]
---FROM #Med_Rx_Benefits
---where [Text] like '%unlimit%'
---	and Limit = ''
 
 select ContractDesc
 	,Title
@@ -329,9 +302,68 @@ select ContractDesc
 	, Combined_or_split_benefit
 	, [TExt] from #Med_Rx_Benefits
 where ContractDesc in (select * from no_limit)
+and ContractDesc not like '%winfant pathways%'
+and Limit = ''
 --and ([Text] like '%Follistim%' or [Text] like '%Ganirelix%' or [Text] like '%Menopur%')
 --and ([Text] like '%surrogacy%' or [Text] like '%adoption%' --or [Text] like '%Menopur%'
 --)
 order by ContractDesc, Title
 ;
+
+select * from #Med_Rx_Benefits
+
+drop table if exists #comparison;
+select
+	  isnull(mrb.ContractDesc,'') as [ContractDesc (FaxLogTable)]
+	, isnull(r.[Contract], '') as [Contract (Rollup Table)] 
+	, isnull(r.RollupName, '') as RollupName
+	, isnull(r.Business, '') as Business
+	, isnull(mrb.Title, '') as Title
+	, isnull(mrb.Benefit_Type, '') as Benefit_Type
+	, isnull(mrb.Limit, '') as Limit
+	, isnull(mrb.Combined_or_split_benefit, '') as Combined_or_split_benefit
+	, isnull(r.MedBenefit, '') as MedBenefit
+	, isnull(r.RxBenefit, '') as RxBenefit
+	, isnull(mrb.[TExt], '') as [TExt]
+	, f.Active
+	, case when coalesce(f.contract_term_dt,f.Termed_Out) IS NULL or coalesce(f.contract_term_dt,f.Termed_Out)=0
+		then 'Active' else 'Termed' END as Termed_Desc
+	, isnull(coalesce(f.contract_term_dt,f.Termed_Out),'') as Termed_Out
+	, mrb.ContractType
+	--, isnull(
+into #comparison
+from #Med_Rx_Benefits mrb
+full join [WorkBench].[dbo].[ContractName_RollUpName_CrossReference] r
+	on mrb.ContractDesc = r.[Contract]
+JOIN dldb.dbo.[dl_dw_luFaxContract] f
+	on mrb.ContractDesc=f.ContractDesc
+		and f.Load_DTM >= (select max(f2.load_dtm) from dldb.dbo.[dl_dw_luFaxContract] f2
+							where f.ContractDesc=f2.ContractDesc)
+--where mrb.ContractDesc
+;
+
+select * from #comparison;
+
+select * from #comparison
+where ContractType = 'Premier';
+
+select distinct 
+[ContractDesc (FaxLogTable)]
+,[Contract (Rollup Table)] 
+,Business
+,ContractType
+,Active
+,Termed_Desc
+,Termed_Out
+from #comparison
+where ContractType = 'Premier'
+and (Termed_Out <> 0 and Termed_Out < getdate());
+
+select distinct Active,Termed_Desc
+FROM #comparison
+	
+
+select * from #comparison
+where (Active=0 and Termed_Desc ='Active')
+or (Active=1 and Termed_Desc ='Termed')
 
